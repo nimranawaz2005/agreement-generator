@@ -22,7 +22,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.7.4",
     "multer": "^2.2.0",
+    "nodemailer": "^9.0.3",
     "openai": "^6.47.0",
     "puppeteer": "^25.3.0"
   }
-}         
+}

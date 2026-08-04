@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import SignatureCanvas from 'react-signature-canvas';
@@ -40,13 +40,9 @@ export default function CreateDocument() {
   const documentRef = useRef(null);
   const sigCanvasRef = useRef(null);
 
-  useEffect(() => {
-    fetchHistory();
-  }, []);
-
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     try {
-      const res = await fetch('/api/documents');
+      const res = await fetch('http://localhost:5000/api/documents');
       if (res.ok) {
         const data = await res.json();
         setHistory(data);
@@ -58,7 +54,11 @@ export default function CreateDocument() {
       const saved = localStorage.getItem('document_history');
       if (saved) setHistory(JSON.parse(saved));
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -121,6 +121,41 @@ export default function CreateDocument() {
 
   const totalCost = items.reduce((sum, item) => sum + (Number(item.cost) || 0), 0);
 
+  const generatePdfInstance = async () => {
+    if (!documentRef.current) return null;
+
+    const element = documentRef.current;
+    const canvas = await html2canvas(element, { 
+      scale: 2, 
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      backgroundColor: '#ffffff'
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('p', 'mm', 'a4');
+
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    const pageHeight = pdf.internal.pageSize.getHeight();
+
+    let heightLeft = pdfHeight;
+    let position = 0;
+
+    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+    heightLeft -= pageHeight;
+
+    while (heightLeft > 0) {
+      position -= pageHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight;
+    }
+
+    return pdf;
+  };
+
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
     if (!documentRef.current) return;
@@ -133,23 +168,8 @@ export default function CreateDocument() {
         currentSig = saveSignature();
       }
 
-      const element = documentRef.current;
-
-      const canvas = await html2canvas(element, { 
-        scale: 2, 
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff'
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      const pdf = await generatePdfInstance();
+      if (!pdf) return;
 
       const cleanName = (formData.preparedFor || 'Document').trim().replace(/[^a-zA-Z0-9]/g, '_');
       const fileName = `${cleanName}_Agreement.pdf`;
@@ -171,7 +191,7 @@ export default function CreateDocument() {
       };
 
       try {
-        const response = await fetch('/api/documents', {
+        const response = await fetch('http://localhost:5000/api/documents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -211,7 +231,7 @@ export default function CreateDocument() {
 
   const handleDeleteDocument = async (id) => {
     try {
-      await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+      await fetch(`http://localhost:5000/api/documents/${id}`, { method: 'DELETE' });
     } catch (error) {
       console.error("Delete Error:", error);
     } finally {
@@ -223,17 +243,50 @@ export default function CreateDocument() {
     }
   };
 
-  const handleSendEmailSubmit = (e) => {
+  const handleSendEmailSubmit = async (e) => {
     e.preventDefault();
     setSendingEmail(true);
-    setTimeout(() => {
+
+    try {
+      let currentSig = signatureDataUrl;
+      if (!currentSig && sigCanvasRef.current && !sigCanvasRef.current.isEmpty()) {
+        currentSig = saveSignature();
+      }
+
+      const pdf = await generatePdfInstance();
+      const pdfBase64 = pdf ? pdf.output('datauristring') : null;
+
+      const response = await fetch('http://localhost:5000/api/documents/send-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipientEmail: formData.clientEmail,
+          documentTitle: `Services Agreement - ${formData.preparedFor}`,
+          preparedFor: formData.preparedFor,
+          totalCost: totalCost,
+          pdfBase64: pdfBase64
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setEmailSentSuccess(true);
+        setTimeout(() => {
+          setEmailSentSuccess(false);
+          setIsEmailModalOpen(false);
+        }, 2000);
+      } else {
+        alert(`❌ Email Error: ${data.error || 'Failed to send email'}`);
+      }
+    } catch (err) {
+      console.error('Email send error:', err);
+      alert('❌ Server connection failed. Check your backend server.');
+    } finally { // <-- FIXED TYPO (was fontFinally)
       setSendingEmail(false);
-      setEmailSentSuccess(true);
-      setTimeout(() => {
-        setEmailSentSuccess(false);
-        setIsEmailModalOpen(false);
-      }, 2000);
-    }, 1500);
+    }
   };
 
   const handleCopyShareLink = () => {
@@ -449,7 +502,7 @@ export default function CreateDocument() {
                 <SignatureCanvas 
                   ref={sigCanvasRef}
                   penColor="#000000"
-                  canvasProps={{ className: 'w-full h-full sigCanvas' }}
+                  canvasProps={{ width: 400, height: 112, className: 'sigCanvas w-full h-full' }}
                   onEnd={saveSignature}
                 />
               </div>
@@ -553,7 +606,7 @@ export default function CreateDocument() {
             <div>
               {/* Header */}
               <div style={{ borderBottom: `3px solid ${brandColor}`, paddingBottom: '16px', marginBottom: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', itemsAlign: 'flex-start' }}>
                   <div>
                     <h1 style={{ fontSize: '22px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
                       SERVICES AGREEMENT
@@ -635,10 +688,10 @@ export default function CreateDocument() {
                 {signatureDataUrl ? (
                   <img src={signatureDataUrl} alt="Signature" style={{ maxHeight: '45px', objectFit: 'contain', marginBottom: '4px' }} />
                 ) : (
-                  <div style={{ height: '45px' }} />
+                  <div style={{ height: '30px', borderBottom: '1px solid #cbd5e1', width: '120px', marginBottom: '4px' }}></div>
                 )}
-                <div style={{ borderTop: '1px solid #94a3b8', width: '160px', marginTop: '4px' }} />
-                <p style={{ fontSize: '11px', color: '#64748b', margin: '4px 0 0 0' }}>Authorized Signatory: {formData.signatory || 'N/A'}</p>
+                <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>Authorized Signatory</p>
+                <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#0f172a', margin: '2px 0 0 0' }}>{formData.signatory || 'John Doe'}</p>
               </div>
             </div>
 
@@ -649,58 +702,61 @@ export default function CreateDocument() {
 
       {/* SHARE / EMAIL MODAL */}
       {isEmailModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl relative">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
             <button 
-              type="button"
-              onClick={() => setIsEmailModalOpen(false)} 
-              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+              onClick={() => setIsEmailModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white"
             >
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-lg font-bold flex items-center gap-2 mb-2 text-slate-100">
+
+            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-1">
               <Mail className="w-5 h-5 text-blue-400" /> Share Document
             </h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Send this document directly to <span className="text-slate-200 font-semibold">{formData.clientEmail || 'the recipient'}</span>.
-            </p>
+            <p className="text-xs text-slate-400 mb-6">Send this agreement directly to the client's email address.</p>
 
-            <form onSubmit={handleSendEmailSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Recipient Email</label>
-                <input 
-                  type="email" 
-                  required 
-                  value={formData.clientEmail} 
-                  onChange={(e) => setFormData(prev => ({ ...prev, clientEmail: e.target.value }))} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500" 
-                  placeholder="client@company.com" 
-                />
+            {emailSentSuccess ? (
+              <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl text-center text-sm font-medium">
+                ✅ Document sent successfully!
               </div>
+            ) : (
+              <form onSubmit={handleSendEmailSubmit} className="space-y-4">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Recipient Email</label>
+                  <input 
+                    type="email" 
+                    required
+                    value={formData.clientEmail} 
+                    onChange={(e) => setFormData(prev => ({ ...prev, clientEmail: e.target.value }))}
+                    placeholder="client@company.com" 
+                    className="w-full bg-slate-950 border border-slate-800 text-xs rounded-xl p-3 text-slate-200 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyShareLink}
-                  className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  {copiedLink ? 'Link Copied!' : 'Copy Link'}
-                </button>
-                <button
-                  type="submit"
-                  disabled={sendingEmail}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs py-2.5 rounded-xl font-semibold transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  {sendingEmail ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                  {emailSentSuccess ? 'Sent Successfully!' : 'Send Email'}
-                </button>
-              </div>
-            </form>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    <Copy className="w-4 h-4" /> {copiedLink ? 'Copied!' : 'Copy Link'}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={sendingEmail}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs py-2.5 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    Send Email
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
 
     </div>
   );
-}   
+}  
