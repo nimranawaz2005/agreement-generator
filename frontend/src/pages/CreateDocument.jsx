@@ -5,8 +5,46 @@ import SignatureCanvas from 'react-signature-canvas';
 import { 
   FileText, Plus, Trash2, Download, Layers, 
   Settings2, UserCheck, Mail, Send, Loader2, Copy, X, 
-  Upload, FolderOpen, RotateCcw
+  Upload, FolderOpen, RotateCcw, LayoutTemplate, BookmarkPlus
 } from 'lucide-react';
+
+// Preset Templates Library Definition
+const PRESET_TEMPLATES = [
+  {
+    id: 'web_dev',
+    name: 'Full-Stack Web Development Agreement',
+    scope: 'Full-stack web application development including architecture design, REST API implementation, frontend React integration, and cloud deployment on AWS/Vercel.',
+    items: [
+      { description: 'Phase 1: Architecture & UI/UX Wireframing', cost: 1500 },
+      { description: 'Phase 2: Frontend & Backend Development', cost: 3500 },
+      { description: 'Phase 3: Testing, QA & Cloud Deployment', cost: 1000 }
+    ]
+  },
+  {
+    id: 'design_retainer',
+    name: 'Monthly UI/UX Design Retainer',
+    scope: 'Ongoing monthly product design services, user research, wireframing, component design system maintenance, and interactive Figma prototyping.',
+    items: [
+      { description: 'Monthly Design Retainer Fee (40 Hours/mo)', cost: 2400 },
+      { description: 'Design System Documentation & Asset Handoff', cost: 600 }
+    ]
+  },
+  {
+    id: 'seo_marketing',
+    name: 'Digital Marketing & SEO Proposal',
+    scope: 'Comprehensive technical SEO audit, keyword strategy development, content optimization, on-page SEO tweaks, and monthly performance report analytics.',
+    items: [
+      { description: 'Technical Site Audit & Keyword Strategy', cost: 800 },
+      { description: 'Monthly Content Optimization & Link Building', cost: 1200 }
+    ]
+  },
+  {
+    id: 'blank',
+    name: 'Blank Document',
+    scope: '',
+    items: [{ description: '', cost: 0 }]
+  }
+];
 
 export default function CreateDocument() {
   const [formData, setFormData] = useState({
@@ -15,7 +53,10 @@ export default function CreateDocument() {
     companyName: 'Your Agency Ltd',
     projectScope: 'Full-stack Web Application Development and Cloud Architecture Setup.',
     signatory: 'John Doe',
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split('T')[0],
+    currency: 'USD ($)',
+    taxRate: 0,
+    discount: 0
   });
 
   const [refId] = useState(() => Math.floor(100000 + Math.random() * 900000));
@@ -23,6 +64,10 @@ export default function CreateDocument() {
   const [watermark, setWatermark] = useState('CONFIDENTIAL');
   const [showWatermark, setShowWatermark] = useState(true);
   const [logoUrl, setLogoUrl] = useState(null); 
+
+  // Template Library State
+  const [templates, setTemplates] = useState(PRESET_TEMPLATES);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('web_dev');
 
   const [items, setItems] = useState([
     { description: 'UI/UX Design Phase', cost: 1200 },
@@ -39,6 +84,37 @@ export default function CreateDocument() {
 
   const documentRef = useRef(null);
   const sigCanvasRef = useRef(null);
+
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('app_settings');
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setFormData((prev) => ({
+          ...prev,
+          companyName: parsed.companyName || prev.companyName,
+          signatory: parsed.signatoryName || prev.signatory,
+          currency: parsed.currency || prev.currency,
+        }));
+        if (parsed.defaultBrandColor) setBrandColor(parsed.defaultBrandColor);
+        if (parsed.defaultWatermark) setWatermark(parsed.defaultWatermark);
+      } catch (error) {
+        console.error("Error reading saved settings:", error);
+      }
+    }
+
+    const savedCustomTemplates = localStorage.getItem('custom_templates');
+    if (savedCustomTemplates) {
+      try {
+        const parsedTemplates = JSON.parse(savedCustomTemplates);
+        if (Array.isArray(parsedTemplates)) {
+          setTemplates([...PRESET_TEMPLATES, ...parsedTemplates]);
+        }
+      } catch (e) {
+        console.error("Error loading custom templates:", e);
+      }
+    }
+  }, []);
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -60,21 +136,64 @@ export default function CreateDocument() {
     fetchHistory();
   }, [fetchHistory]);
 
+  const handleSelectTemplate = (templateId) => {
+    setSelectedTemplateId(templateId);
+    const template = templates.find((t) => t.id === templateId);
+    if (template) {
+      setFormData((prev) => ({
+        ...prev,
+        projectScope: template.scope
+      }));
+      setItems(template.items.map(item => ({ ...item })));
+    }
+  };
+
+  const handleSaveAsTemplate = () => {
+    const templateName = prompt('Enter a name for this new template:');
+    if (!templateName) return;
+
+    const newTemplate = {
+      id: `custom_${Date.now()}`,
+      name: templateName,
+      scope: formData.projectScope,
+      items: items.map(i => ({ ...i }))
+    };
+
+    let existingCustom = [];
+    try {
+      existingCustom = JSON.parse(localStorage.getItem('custom_templates') || '[]');
+      if (!Array.isArray(existingCustom)) existingCustom = [];
+    } catch (e) {
+      existingCustom = [];
+    }
+
+    const updatedCustom = [...existingCustom, newTemplate];
+    
+    localStorage.setItem('custom_templates', JSON.stringify(updatedCustom));
+    setTemplates([...PRESET_TEMPLATES, ...updatedCustom]);
+    setSelectedTemplateId(newTemplate.id);
+  };
+
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const { name, value, type } = e.target;
+    setFormData(prev => ({ 
+      ...prev, 
+      [name]: type === 'number' ? (value === '' ? 0 : Math.max(0, Number(value))) : value 
+    }));
   };
 
   const handleItemChange = (index, field, value) => {
-    setItems(prevItems => {
-      const newItems = [...prevItems];
-      if (field === 'cost') {
-        newItems[index][field] = value === '' ? 0 : Math.max(0, Number(value));
-      } else {
-        newItems[index][field] = value;
-      }
-      return newItems;
-    });
+    setItems(prevItems => 
+      prevItems.map((item, idx) => {
+        if (idx === index) {
+          return {
+            ...item,
+            [field]: field === 'cost' ? (value === '' ? 0 : Math.max(0, Number(value))) : value
+          };
+        }
+        return item;
+      })
+    );
   };
 
   const addItem = () => {
@@ -99,7 +218,7 @@ export default function CreateDocument() {
   const clearLogo = () => setLogoUrl(null);
 
   const clearSignature = () => {
-    if (sigCanvasRef.current) {
+    if (sigCanvasRef.current && typeof sigCanvasRef.current.clear === 'function') {
       sigCanvasRef.current.clear();
       setSignatureDataUrl(null);
     }
@@ -107,11 +226,17 @@ export default function CreateDocument() {
 
   const saveSignature = () => {
     try {
-      if (sigCanvasRef.current && !sigCanvasRef.current.isEmpty()) {
+      if (
+        sigCanvasRef.current && 
+        typeof sigCanvasRef.current.isEmpty === 'function' && 
+        !sigCanvasRef.current.isEmpty()
+      ) {
         const canvas = sigCanvasRef.current.getCanvas();
-        const dataUrl = canvas.toDataURL('image/png');
-        setSignatureDataUrl(dataUrl);
-        return dataUrl;
+        if (canvas) {
+          const dataUrl = canvas.toDataURL('image/png');
+          setSignatureDataUrl(dataUrl);
+          return dataUrl;
+        }
       }
     } catch (err) {
       console.error("Signature save error:", err);
@@ -119,7 +244,11 @@ export default function CreateDocument() {
     return null;
   };
 
-  const totalCost = items.reduce((sum, item) => sum + (Number(item.cost) || 0), 0);
+  const subtotal = items.reduce((sum, item) => sum + (Number(item.cost) || 0), 0);
+  const discountAmount = Number(formData.discount) || 0;
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
+  const taxAmount = (taxableAmount * (Number(formData.taxRate) || 0)) / 100;
+  const totalCost = taxableAmount + taxAmount;
 
   const generatePdfInstance = async () => {
     if (!documentRef.current) return null;
@@ -137,20 +266,20 @@ export default function CreateDocument() {
     const pdf = new jsPDF('p', 'mm', 'a4');
 
     const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-    const pageHeight = pdf.internal.pageSize.getHeight();
+    const pdfPageHeight = pdf.internal.pageSize.getHeight();
+    const renderedImgHeight = (canvas.height * pdfWidth) / canvas.width;
 
-    let heightLeft = pdfHeight;
+    let heightLeft = renderedImgHeight;
     let position = 0;
 
-    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-    heightLeft -= pageHeight;
+    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderedImgHeight);
+    heightLeft -= pdfPageHeight;
 
     while (heightLeft > 0) {
-      position -= pageHeight;
+      position = heightLeft - renderedImgHeight;
       pdf.addPage();
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-      heightLeft -= pageHeight;
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderedImgHeight);
+      heightLeft -= pdfPageHeight;
     }
 
     return pdf;
@@ -163,9 +292,8 @@ export default function CreateDocument() {
     setLoading(true);
 
     try {
-      let currentSig = signatureDataUrl;
-      if (!currentSig && sigCanvasRef.current && !sigCanvasRef.current.isEmpty()) {
-        currentSig = saveSignature();
+      if (!signatureDataUrl) {
+        saveSignature();
       }
 
       const pdf = await generatePdfInstance();
@@ -186,6 +314,10 @@ export default function CreateDocument() {
         signatory: formData.signatory,
         date: formData.date,
         items: items,
+        subtotal: subtotal,
+        discount: discountAmount,
+        taxRate: formData.taxRate,
+        taxAmount: taxAmount,
         totalCost: totalCost,
         format: 'pdf'
       };
@@ -222,12 +354,15 @@ export default function CreateDocument() {
       companyName: doc.companyName || '',
       projectScope: doc.projectScope || '',
       signatory: doc.signatory || '',
-      date: doc.date ? doc.date.substring(0, 10) : new Date().toISOString().split('T')[0]
+      date: doc.date ? doc.date.substring(0, 10) : new Date().toISOString().split('T')[0],
+      currency: doc.currency || 'USD ($)',
+      taxRate: doc.taxRate || 0,
+      discount: doc.discount || 0
     });
     if (doc.items && Array.isArray(doc.items)) {
       setItems(doc.items);
     }
-  };
+  };  
 
   const handleDeleteDocument = async (id) => {
     try {
@@ -240,60 +375,6 @@ export default function CreateDocument() {
         localStorage.setItem('document_history', JSON.stringify(updated));
         return updated;
       });
-    }
-  };
-
-  const handleSendEmailSubmit = async (e) => {
-    e.preventDefault();
-    setSendingEmail(true);
-
-    try {
-      let currentSig = signatureDataUrl;
-      if (!currentSig && sigCanvasRef.current && !sigCanvasRef.current.isEmpty()) {
-        currentSig = saveSignature();
-      }
-
-      const pdf = await generatePdfInstance();
-      const pdfBase64 = pdf ? pdf.output('datauristring') : null;
-
-      const response = await fetch('http://localhost:5000/api/documents/send-email', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recipientEmail: formData.clientEmail,
-          documentTitle: `Services Agreement - ${formData.preparedFor}`,
-          preparedFor: formData.preparedFor,
-          totalCost: totalCost,
-          pdfBase64: pdfBase64
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setEmailSentSuccess(true);
-        setTimeout(() => {
-          setEmailSentSuccess(false);
-          setIsEmailModalOpen(false);
-        }, 2000);
-      } else {
-        alert(`❌ Email Error: ${data.error || 'Failed to send email'}`);
-      }
-    } catch (err) {
-      console.error('Email send error:', err);
-      alert('❌ Server connection failed. Check your backend server.');
-    } finally { // <-- FIXED TYPO (was fontFinally)
-      setSendingEmail(false);
-    }
-  };
-
-  const handleCopyShareLink = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(window.location.href);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
     }
   };
 
@@ -334,6 +415,35 @@ export default function CreateDocument() {
         
         {/* LEFT COLUMN */}
         <div className="lg:col-span-5 space-y-6">
+
+          {/* TEMPLATE LIBRARY */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
+            <div className="flex justify-between items-center">
+              <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <LayoutTemplate className="w-4 h-4 text-blue-400" /> Template Library
+              </h2>
+              <button
+                type="button"
+                onClick={handleSaveAsTemplate}
+                className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium transition-colors"
+                title="Save current form layout as template"
+              >
+                <BookmarkPlus className="w-3.5 h-3.5" /> Save Current as Template
+              </button>
+            </div>
+
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => handleSelectTemplate(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 text-xs rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer"
+            >
+              {templates.map((tmpl) => (
+                <option key={tmpl.id} value={tmpl.id}>
+                  {tmpl.name}
+                </option>
+              ))}
+            </select>
+          </div>
           
           {/* Styling Options */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
@@ -393,7 +503,7 @@ export default function CreateDocument() {
           </div>
 
           {/* Form Fields */}
-          <form onSubmit={(e) => e.preventDefault()} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
             <h2 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
               <Layers className="w-4 h-4 text-blue-400" /> Document Details
             </h2>
@@ -472,6 +582,32 @@ export default function CreateDocument() {
               ))}
             </div>
 
+            {/* Financial Calculations (Tax & Discount) */}
+            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Discount ($)</label>
+                <input 
+                  type="number" 
+                  name="discount" 
+                  value={formData.discount === 0 ? '' : formData.discount} 
+                  onChange={handleInputChange} 
+                  placeholder="0"
+                  className="w-full bg-slate-950 border border-slate-800 text-xs rounded-lg p-2 text-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Tax Rate (%)</label>
+                <input 
+                  type="number" 
+                  name="taxRate" 
+                  value={formData.taxRate === 0 ? '' : formData.taxRate} 
+                  onChange={handleInputChange} 
+                  placeholder="0"
+                  className="w-full bg-slate-950 border border-slate-800 text-xs rounded-lg p-2 text-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800">
               <div>
                 <label className="text-xs text-slate-400 block mb-1">Signatory Name</label>
@@ -502,7 +638,7 @@ export default function CreateDocument() {
                 <SignatureCanvas 
                   ref={sigCanvasRef}
                   penColor="#000000"
-                  canvasProps={{ width: 400, height: 112, className: 'sigCanvas w-full h-full' }}
+                  canvasProps={{ width: 400, height: 112, className: 'sigCanvas' }}
                   onEnd={saveSignature}
                 />
               </div>
@@ -606,7 +742,7 @@ export default function CreateDocument() {
             <div>
               {/* Header */}
               <div style={{ borderBottom: `3px solid ${brandColor}`, paddingBottom: '16px', marginBottom: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', itemsAlign: 'flex-start' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
                     <h1 style={{ fontSize: '22px', fontWeight: 'bold', color: '#0f172a', margin: 0 }}>
                       SERVICES AGREEMENT
@@ -630,133 +766,54 @@ export default function CreateDocument() {
                 </div>
               </div>
 
-              {/* Client Info */}
-              <div style={{ backgroundColor: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '24px', borderLeft: `4px solid ${brandColor}` }}>
-                <span style={{ fontSize: '10px', textTransform: 'uppercase', color: '#64748b', fontWeight: 'bold', display: 'block' }}>
-                  PREPARED FOR
-                </span>
-                <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', margin: '2px 0 0 0' }}>
-                  {formData.preparedFor || 'Client Name'}
-                </p>
+              {/* Document Body Details */}
+              <div style={{ marginBottom: '24px', fontSize: '12px' }}>
+                <p><strong>Prepared For:</strong> {formData.preparedFor}</p>
+                <p style={{ marginTop: '8px' }}><strong>Scope of Work:</strong></p>
+                <p style={{ color: '#475569', marginTop: '4px' }}>{formData.projectScope}</p>
               </div>
 
-              {/* Project Scope */}
-              <div style={{ marginBottom: '24px' }}>
-                <span style={{ fontSize: '10px', fontWeight: 'bold', color: brandColor, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '6px' }}>
-                  1.0 Project Scope & Deliverables
-                </span>
-                <p style={{ fontSize: '12px', color: '#334155', lineHeight: '1.6', margin: 0, whiteSpace: 'pre-line' }}>
-                  {formData.projectScope || 'No project scope specified.'}
-                </p>
-              </div>
+              {/* Line Items Table */}
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '24px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                    <th style={{ padding: '8px 0' }}>Description</th>
+                    <th style={{ padding: '8px 0', textAlign: 'right' }}>Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px 0' }}>{item.description}</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right' }}>${(Number(item.cost) || 0).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
 
-              {/* Cost Table */}
-              <div style={{ marginBottom: '32px' }}>
-                <span style={{ fontSize: '10px', fontWeight: 'bold', color: brandColor, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '8px' }}>
-                  2.0 Financial Summary
-                </span>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1px solid #cbd5e1' }}>
-                      <th style={{ padding: '8px', textAlign: 'left', color: '#475569' }}>Description</th>
-                      <th style={{ padding: '8px', textAlign: 'right', color: '#475569', width: '100px' }}>Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((item, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '8px', color: '#334155' }}>{item.description || 'Deliverable description'}</td>
-                        <td style={{ padding: '8px', textAlign: 'right', color: '#334155' }}>${Number(item.cost || 0).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: `2px solid ${brandColor}`, fontWeight: 'bold' }}>
-                      <td style={{ padding: '8px', textAlign: 'right', color: '#0f172a' }}>Total Amount:</td>
-                      <td style={{ padding: '8px', textAlign: 'right', color: brandColor }}>${totalCost.toLocaleString()}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              {/* Financial Totals */}
+              <div style={{ textAlign: 'right', fontSize: '12px', marginBottom: '24px' }}>
+                <p>Subtotal: ${subtotal.toLocaleString()}</p>
+                {discountAmount > 0 && <p>Discount: -${discountAmount.toLocaleString()}</p>}
+                {taxAmount > 0 && <p>Tax ({formData.taxRate}%): ${taxAmount.toLocaleString()}</p>}
+                <p style={{ fontWeight: 'bold', fontSize: '14px', color: brandColor, marginTop: '4px' }}>
+                  Total: ${totalCost.toLocaleString()}
+                </p>
               </div>
             </div>
 
-            {/* Signature Block */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-              <div>
-                <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>Client Representative</p>
-                <p style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f172a', margin: '4px 0 0 0' }}>{formData.preparedFor || '__________________'}</p>
-              </div>
-              <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                {signatureDataUrl ? (
-                  <img src={signatureDataUrl} alt="Signature" style={{ maxHeight: '45px', objectFit: 'contain', marginBottom: '4px' }} />
-                ) : (
-                  <div style={{ height: '30px', borderBottom: '1px solid #cbd5e1', width: '120px', marginBottom: '4px' }}></div>
-                )}
-                <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>Authorized Signatory</p>
-                <p style={{ fontSize: '12px', fontWeight: 'bold', color: '#0f172a', margin: '2px 0 0 0' }}>{formData.signatory || 'John Doe'}</p>
-              </div>
+            {/* Signature Area */}
+            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+              <p style={{ fontSize: '11px', fontWeight: 'bold' }}>Signatory: {formData.signatory}</p>
+              {signatureDataUrl && (
+                <img src={signatureDataUrl} alt="Signature" style={{ height: '40px', marginTop: '8px' }} />
+              )}
             </div>
 
           </div>
         </div>
 
       </div>
-
-      {/* SHARE / EMAIL MODAL */}
-      {isEmailModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative">
-            <button 
-              onClick={() => setIsEmailModalOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-1">
-              <Mail className="w-5 h-5 text-blue-400" /> Share Document
-            </h3>
-            <p className="text-xs text-slate-400 mb-6">Send this agreement directly to the client's email address.</p>
-
-            {emailSentSuccess ? (
-              <div className="p-4 bg-green-500/10 border border-green-500/20 text-green-400 rounded-xl text-center text-sm font-medium">
-                ✅ Document sent successfully!
-              </div>
-            ) : (
-              <form onSubmit={handleSendEmailSubmit} className="space-y-4">
-                <div>
-                  <label className="text-xs text-slate-400 block mb-1">Recipient Email</label>
-                  <input 
-                    type="email" 
-                    required
-                    value={formData.clientEmail} 
-                    onChange={(e) => setFormData(prev => ({ ...prev, clientEmail: e.target.value }))}
-                    placeholder="client@company.com" 
-                    className="w-full bg-slate-950 border border-slate-800 text-xs rounded-xl p-3 text-slate-200 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyShareLink}
-                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Copy className="w-4 h-4" /> {copiedLink ? 'Copied!' : 'Copy Link'}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={sendingEmail}
-                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-xs py-2.5 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    {sendingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    Send Email
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
     </div>
   );
-}  
+}

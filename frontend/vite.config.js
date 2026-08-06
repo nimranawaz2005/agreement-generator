@@ -1,3 +1,4 @@
+// vite.config.js
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -22,5 +23,16 @@ export default defineConfig({
         secure: false,
       }
     }
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: [path.resolve(__dirname, './src/setupTests.js')],
+    css: false,
+    server: {
+      deps: {
+        inline: [/lucide-react/],
+      },
+    },
   }
-})  
+})   

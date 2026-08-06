@@ -11,9 +11,9 @@ const TEMPLATES = [
       title: 'Software Development Agreement',
       projectScope: 'Design, develop, test, and deploy a custom web application tailored to client requirements.',
       items: [
-        { description: 'Frontend & Backend Core Development', amount: 5000 },
-        { description: 'Database Setup & API Integration', amount: 2500 },
-        { description: 'Deployment & Quality Assurance', amount: 1000 }
+        { description: 'Frontend & Backend Core Development', cost: 5000 },
+        { description: 'Database Setup & API Integration', cost: 2500 },
+        { description: 'Deployment & Quality Assurance', cost: 1000 }
       ]
     }
   },
@@ -26,8 +26,8 @@ const TEMPLATES = [
       title: 'Brand Design Proposal',
       projectScope: 'Create full brand identity including logo variations, color palettes, typography, and social media assets.',
       items: [
-        { description: 'Logo Design & Visual Identity', amount: 1500 },
-        { description: 'Brand Style Guide & Assets Package', amount: 800 }
+        { description: 'Logo Design & Visual Identity', cost: 1500 },
+        { description: 'Brand Style Guide & Assets Package', cost: 800 }
       ]
     }
   },
@@ -40,8 +40,8 @@ const TEMPLATES = [
       title: 'Monthly Service Retainer',
       projectScope: 'Ongoing technical maintenance, security patches, monthly database backups, and up to 15 hours of on-demand technical support.',
       items: [
-        { description: 'Monthly System Maintenance & Backups', amount: 800 },
-        { description: '15 Dedicated Support Hours', amount: 1200 }
+        { description: 'Monthly System Maintenance & Backups', cost: 800 },
+        { description: '15 Dedicated Support Hours', cost: 1200 }
       ]
     }
   }
@@ -75,7 +75,7 @@ const TemplateLibrary = () => {
               padding: '1.5rem',
               display: 'flex',
               flexDirection: 'column',
-              justify: 'space-between',
+              justifyContent: 'space-between',
               boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2)'
             }}
           >
@@ -126,4 +126,4 @@ const TemplateLibrary = () => {
   );
 };
 
-export default TemplateLibrary;   
+export default TemplateLibrary; 

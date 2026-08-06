@@ -28,8 +28,16 @@ const Dashboard = () => {
     }
   };
 
-  // Status Change Handler
+  // Status Change Handler with Graceful Local Fallback
   const handleStatusChange = async (id, newStatus) => {
+    // 1. Optimistically update local state immediately so UI changes smoothly
+    setDocuments((prevDocs) =>
+      prevDocs.map((doc) =>
+        doc._id === id || doc.id === id ? { ...doc, status: newStatus } : doc
+      )
+    );
+
+    // 2. Sync with Backend
     try {
       const response = await fetch(`http://localhost:5000/api/documents/${id}/status`, {
         method: 'PUT',
@@ -37,18 +45,25 @@ const Dashboard = () => {
         body: JSON.stringify({ status: newStatus }),
       });
 
-      if (response.ok) {
-        setDocuments((prevDocs) =>
-          prevDocs.map((doc) =>
-            doc._id === id || doc.id === id ? { ...doc, status: newStatus } : doc
-          )
-        );
-      } else {
-        alert('Failed to update status.');
+      if (!response.ok) {
+        console.warn(`Server returned ${response.status}. Fallback mode active.`);
       }
     } catch (err) {
-      console.error('Status update error:', err);
-      alert('Error updating status.');
+      console.warn('Backend update error, updating local storage fallback:', err.message);
+    }
+
+    // 3. Always update localStorage as a fallback backup
+    try {
+      const localData = localStorage.getItem('document_history');
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        const updatedLocal = parsed.map((doc) =>
+          doc._id === id || doc.id === id ? { ...doc, status: newStatus } : doc
+        );
+        localStorage.setItem('document_history', JSON.stringify(updatedLocal));
+      }
+    } catch (e) {
+      console.error('LocalStorage sync error:', e);
     }
   };
 
@@ -56,19 +71,31 @@ const Dashboard = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('Are you sure you want to delete this document?')) return;
 
+    // Optimistically remove from state
+    setDocuments((prevDocs) => prevDocs.filter((doc) => doc._id !== id && doc.id !== id));
+
     try {
       const response = await fetch(`http://localhost:5000/api/documents/${id}`, {
         method: 'DELETE',
       });
 
-      if (response.ok) {
-        setDocuments(documents.filter((doc) => doc._id !== id && doc.id !== id));
-      } else {
-        alert('Failed to delete document.');
+      if (!response.ok) {
+        console.warn('Failed to delete on server');
       }
     } catch (err) {
       console.error('Delete error:', err);
-      alert('Error deleting document.');
+    }
+
+    // Backup cleanup in localStorage
+    try {
+      const localData = localStorage.getItem('document_history');
+      if (localData) {
+        const parsed = JSON.parse(localData);
+        const filteredLocal = parsed.filter((doc) => doc._id !== id && doc.id !== id);
+        localStorage.setItem('document_history', JSON.stringify(filteredLocal));
+      }
+    } catch (e) {
+      console.error('LocalStorage delete sync error:', e);
     }
   };
 
@@ -94,11 +121,12 @@ const Dashboard = () => {
   // Filter documents by search term
   const filteredDocs = (documents || []).filter((doc) => {
     const term = searchTerm.toLowerCase();
+    const docId = doc._id || doc.id || '';
     return (
       (doc.preparedFor && doc.preparedFor.toLowerCase().includes(term)) ||
       (doc.companyName && doc.companyName.toLowerCase().includes(term)) ||
       (doc.title && doc.title.toLowerCase().includes(term)) ||
-      (doc.id && doc.id.toLowerCase().includes(term))
+      docId.toLowerCase().includes(term)
     );
   });
 
